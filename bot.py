@@ -1,5 +1,7 @@
 import os
 import logging
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from groq import Groq
@@ -14,6 +16,20 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
+
+# ── سيرفر وهمي لإرضاء Render ─────────────────────────────
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+    def log_message(self, format, *args):
+        pass
+
+def run_server():
+    port = int(os.environ.get("PORT", 10000))
+    HTTPServer(('', port), Handler).serve_forever()
+
+threading.Thread(target=run_server, daemon=True).start()
 
 # ── سياق كل مستخدم (ذاكرة المحادثة) ─────────────────────
 user_histories: dict[int, list[dict]] = {}
@@ -53,11 +69,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id  = update.effective_user.id
     user_msg = update.message.text
 
-    # بناء التاريخ
     history = user_histories.get(user_id, [])
     history.append({"role": "user", "content": user_msg})
 
-    # احتفاظ بآخر 20 رسالة فقط لتوفير الـ tokens
     if len(history) > 20:
         history = history[-20:]
 
@@ -67,7 +81,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",   # نموذج مجاني وقوي من Groq
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": SYSTEM_PROMPT}] + history,
             max_tokens=1024,
             temperature=0.7,
